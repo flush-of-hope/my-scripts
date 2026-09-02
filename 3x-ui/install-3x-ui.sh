@@ -11,8 +11,8 @@
 set -Eeuo pipefail
 
 readonly XUI_INSTALL_URL="https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh"
-readonly XUI_PANEL_PORT="8443"
-readonly XUI_ACME_PORT="80"
+readonly PANEL_PORT="8443"
+readonly ACME_PORT="80"
 
 log() {
     printf '\n[%s] %s\n' "$(date '+%F %T')" "$*"
@@ -91,7 +91,7 @@ read_credentials() {
 
 check_ports() {
     local port
-    for port in "${XUI_PANEL_PORT}" "${XUI_ACME_PORT}"; do
+    for port in "${PANEL_PORT}" "${ACME_PORT}"; do
         if command -v ss >/dev/null 2>&1 && ss -ltnH 2>/dev/null | awk -v p=":${port}" '$4 ~ p"$" {found=1} END {exit found ? 0 : 1}'; then
             die "端口 ${port} 已被占用，请先释放该端口后再运行。"
         fi
@@ -115,17 +115,17 @@ install_xui() {
         "${XUI_INSTALL_URL}" -o "${installer_file}"
     [[ -s "${installer_file}" ]] || die "官方安装器下载失败或文件为空。"
 
-    log "安装 3x-ui：SQLite、面板端口 ${XUI_PANEL_PORT}、域名证书"
+    log "安装 3x-ui：SQLite、面板端口 ${PANEL_PORT}、域名证书"
     # The current official installer supports these environment variables in
     # non-interactive mode. This avoids brittle expect/terminal prompt matching.
     XUI_NONINTERACTIVE=1 \
     XUI_DB_TYPE=sqlite \
-    XUI_PANEL_PORT="${XUI_PANEL_PORT}" \
+    XUI_PANEL_PORT="${PANEL_PORT}" \
     XUI_SSL_MODE=domain \
     XUI_DOMAIN="${DOMAIN}" \
     XUI_USERNAME="${XUI_USERNAME}" \
     XUI_PASSWORD="${XUI_PASSWORD}" \
-    XUI_ACME_HTTP_PORT="${XUI_ACME_PORT}" \
+    XUI_ACME_HTTP_PORT="${ACME_PORT}" \
     bash "${installer_file}"
 }
 
@@ -163,9 +163,9 @@ show_result() {
     printf '\n==============================================\n'
     printf '3x-ui 安装流程已完成\n'
     printf '==============================================\n'
-    printf '面板域名： https://%s:%s（完整 WebBasePath 请以上方安装器输出为准）\n' "${DOMAIN}" "${XUI_PANEL_PORT}"
+    printf '面板域名： https://%s:%s（完整 WebBasePath 请以上方安装器输出为准）\n' "${DOMAIN}" "${PANEL_PORT}"
     printf '账号密码：请查看上方安装器输出，或读取：%s\n' "${result_file}"
-    printf '\n前提：域名 A 记录必须指向本机公网 IP，且云防火墙/安全组放行 TCP %s 和 TCP %s。\n' "${XUI_PANEL_PORT}" "${XUI_ACME_PORT}"
+    printf '\n前提：域名 A 记录必须指向本机公网 IP，且云防火墙/安全组放行 TCP %s 和 TCP %s。\n' "${PANEL_PORT}" "${ACME_PORT}"
     printf '管理命令：x-ui\n'
 }
 
@@ -177,7 +177,7 @@ main() {
     check_ports
 
     log "目标域名：${DOMAIN}"
-    log "域名证书申请需要域名已解析到本机，并确保公网 TCP 端口 ${XUI_ACME_PORT} 可访问。"
+    log "域名证书申请需要域名已解析到本机，并确保公网 TCP 端口 ${ACME_PORT} 可访问。"
 
     update_system
     install_xui

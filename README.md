@@ -3,4 +3,4 @@
 
 安装CrowdSec：bash <(curl -fsSL https://raw.githubusercontent.com/flush-of-hope/my-scripts/main/CrowdSec/install-crowdsec-guard.sh)
 
-安装cloudflared自动更新脚本：bash <(curl -fsSL https://raw.githubusercontent.com/flush-of-hope/my-scripts/main/CrowdSec/cloudflared-auto-update-installer.sh)
+安装cloudflared自动更新脚本：bash <(curl -fsSL https://raw.githubusercontent.com/flush-of-hope/my-scripts/main/cloudflared/cloudflared-auto-update-installer.sh)

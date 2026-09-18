@@ -17,6 +17,7 @@ IFS=$'\n\t'
 # 菜单循环运行，只有选择 0 才退出。
 # ============================================================
 
+readonly SETUP_VERSION='2026-09-18.3'
 readonly TTY='/dev/tty'
 readonly RAW_BASE='https://raw.githubusercontent.com/flush-of-hope/my-scripts/main'
 
@@ -80,9 +81,13 @@ run_remote_script() {
     local path="$1"
     shift || true
 
-    local url="${RAW_BASE}/${path}"
+    local cache_buster=''
+    local url=''
     local tmp=''
     local rc=0
+
+    cache_buster="$(date +%s%N 2>/dev/null || date +%s)"
+    url="${RAW_BASE}/${path}?cb=${cache_buster}"
 
     tmp="$(mktemp -t new-machine-script.XXXXXX)"
 
@@ -93,6 +98,8 @@ run_remote_script() {
         --show-error \
         --silent \
         --location \
+        --header 'Cache-Control: no-cache' \
+        --header 'Pragma: no-cache' \
         --proto '=https' \
         --proto-redir '=https' \
         --connect-timeout 15 \
@@ -101,7 +108,7 @@ run_remote_script() {
         "$url"; then
 
         rm -f -- "$tmp"
-        error "下载失败：${url}"
+        error "下载失败：${path}"
         return 1
     fi
 
@@ -369,6 +376,7 @@ print_menu() {
 
     echo '============================================================'
     echo ' New Machine Setup - Debian'
+    echo " 版本: ${SETUP_VERSION}"
     echo '============================================================'
     echo
     echo '【推荐执行顺序：从 1 开始依次往下执行】'

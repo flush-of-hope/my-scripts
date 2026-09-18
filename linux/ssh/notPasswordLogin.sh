@@ -42,39 +42,141 @@ ask_yes_no() {
 }
 
 # ============================================================
-# SSH service 检测
+# SSH 运行方式检测 / 安全重载
+#
+# 不再要求必须存在 ssh.service / sshd.service。
+# 支持：
+#   1. ssh.service
+#   2. sshd.service
+#   3. ssh.socket
+#   4. 非 systemd 管理的独立 sshd
 # ============================================================
 
-detect_ssh_service() {
+detect_ssh_runtime() {
     SSH_SERVICE=''
+    SSH_SOCKET=''
 
-    if systemctl cat ssh.service >/dev/null 2>&1; then
-        SSH_SERVICE='ssh.service'
-    elif systemctl cat sshd.service >/dev/null 2>&1; then
-        SSH_SERVICE='sshd.service'
-    else
-        die '无法确定 SSH systemd 服务。'
+    if command -v systemctl >/dev/null 2>&1; then
+        local unit load_state
+
+        for unit in ssh.service sshd.service; do
+            load_state="$(systemctl show "$unit" -p LoadState --value 2>/dev/null || true)"
+
+            if [[ "$load_state" == 'loaded' ]]; then
+                SSH_SERVICE="$unit"
+                break
+            fi
+        done
+
+        load_state="$(systemctl show ssh.socket -p LoadState --value 2>/dev/null || true)"
+        if [[ "$load_state" == 'loaded' ]]; then
+            SSH_SOCKET='ssh.socket'
+        fi
     fi
 
-    log "检测到 SSH 服务：${SSH_SERVICE}"
-
-    if systemctl is-active --quiet ssh.socket 2>/dev/null; then
-        log '检测到 ssh.socket 激活模式。'
+    if [[ -n "$SSH_SERVICE" ]]; then
+        log "检测到 SSH systemd 服务：${SSH_SERVICE}"
+    elif [[ -n "$SSH_SOCKET" ]]; then
+        log "检测到 SSH socket：${SSH_SOCKET}"
+    else
+        warn '未检测到标准 ssh.service / sshd.service，将使用 sshd 进程方式重载。'
     fi
 }
 
+find_sshd_listener_pid() {
+    local pid=''
+
+    # 优先从实际监听 socket 中找 sshd PID。
+    if command -v ss >/dev/null 2>&1; then
+        pid="$(
+            ss -H -lntp 2>/dev/null |
+                awk '
+                    /users:\(\("sshd"/ {
+                        if (match($0, /pid=[0-9]+/)) {
+                            x=substr($0, RSTART, RLENGTH)
+                            sub(/^pid=/, "", x)
+                            print x
+                            exit
+                        }
+                    }
+                '
+        )"
+    fi
+
+    if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+        printf '%s\n' "$pid"
+        return 0
+    fi
+
+    # 常规独立 sshd 主进程通常 PPID=1。
+    pid="$(
+        ps -eo pid=,ppid=,comm= 2>/dev/null |
+            awk '$3=="sshd" && $2==1 {print $1; exit}'
+    )"
+
+    if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+        printf '%s\n' "$pid"
+        return 0
+    fi
+
+    return 1
+}
+
 reload_ssh() {
+    local listener_pid=''
+
+    # 永远先验证配置，验证失败绝不 reload。
     "$SSHD_BIN" -t || die 'sshd 配置语法检查失败，未重新加载 SSH。'
 
-    if systemctl is-active --quiet "$SSH_SERVICE" 2>/dev/null; then
-        systemctl reload "$SSH_SERVICE"
-    elif systemctl is-active --quiet ssh.socket 2>/dev/null; then
-        # socket activation 模式下，新连接会读取新配置。
-        # 重启 socket 让监听状态重新建立；现有 SSH 会话不会因此主动退出。
-        systemctl restart ssh.socket
-    else
-        systemctl reload-or-restart "$SSH_SERVICE"
+    # 1) 标准 systemd service。
+    if [[ -n "${SSH_SERVICE:-}" ]] && command -v systemctl >/dev/null 2>&1; then
+        if systemctl reload "$SSH_SERVICE" >/dev/null 2>&1; then
+            log "SSH 已通过 ${SSH_SERVICE} reload。"
+            return 0
+        fi
+
+        # 某些 unit 不实现 reload，尝试 HUP 主进程前不直接 restart，
+        # 避免不必要地影响 SSH 连接。
+        warn "${SSH_SERVICE} reload 未成功，尝试 sshd 主进程重载。"
     fi
+
+    # 2) 找到真正监听端口的 sshd 主进程，发送 SIGHUP。
+    # OpenSSH master 收到 HUP 会重新读取配置；现有会话不会因此被主动踢掉。
+    if listener_pid="$(find_sshd_listener_pid)"; then
+        if kill -HUP "$listener_pid"; then
+            log "已向 sshd 主进程 PID ${listener_pid} 发送 HUP，配置已重新加载。"
+            return 0
+        fi
+    fi
+
+    # 3) socket activation。
+    # 新连接会启动新的 sshd 并读取当前配置，因此无需依赖 ssh.service。
+    if [[ -n "${SSH_SOCKET:-}" ]] && command -v systemctl >/dev/null 2>&1; then
+        if systemctl is-active --quiet "$SSH_SOCKET" 2>/dev/null; then
+            log "检测到 ${SSH_SOCKET} 激活模式；新 SSH 连接将直接读取新配置。"
+            return 0
+        fi
+
+        if systemctl start "$SSH_SOCKET" >/dev/null 2>&1; then
+            log "已启动 ${SSH_SOCKET}；新 SSH 连接将读取新配置。"
+            return 0
+        fi
+    fi
+
+    # 4) 最后的兼容尝试：直接调用传统 service 命令。
+    if command -v service >/dev/null 2>&1; then
+        if service ssh reload >/dev/null 2>&1; then
+            log 'SSH 已通过 service ssh reload。'
+            return 0
+        fi
+
+        if service sshd reload >/dev/null 2>&1; then
+            log 'SSH 已通过 service sshd reload。'
+            return 0
+        fi
+    fi
+
+    die 'sshd 配置语法正确，但无法安全重新加载 SSH。未执行 restart，以避免断开当前连接。'
 }
 
 # ============================================================
@@ -109,7 +211,7 @@ check_environment() {
         DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-client
     fi
 
-    detect_ssh_service
+    detect_ssh_runtime
 }
 
 # ============================================================

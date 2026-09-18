@@ -13,6 +13,7 @@ IFS=$'\n\t'
 #   5. CrowdSec + nftables 防火墙（最后执行）
 #
 # 菜单中的 1-5 就是实际推荐执行顺序。
+# 端口管理属于 CrowdSec 安装完成后的辅助功能。
 # 菜单循环运行，只有选择 0 才退出。
 # ============================================================
 
@@ -24,11 +25,11 @@ readonly SCRIPT_SSH='linux/ssh/notPasswordLogin.sh'
 readonly SCRIPT_3XUI='3x-ui/install-3x-ui.sh'
 readonly SCRIPT_CLOUDFLARED='cloudflare/cloudflared-auto-update-installer.sh'
 readonly SCRIPT_CROWDSEC='CrowdSec/install-crowdsec-guard.sh'
+readonly SCRIPT_PORT_MANAGER='CrowdSec/manage-ports.sh'
 
 green='\033[1;32m'
 yellow='\033[1;33m'
 red='\033[1;31m'
-cyan='\033[1;36m'
 reset='\033[0m'
 
 log() {
@@ -196,6 +197,20 @@ run_crowdsec() {
     run_remote_script "$SCRIPT_CROWDSEC"
 }
 
+run_port_manager() {
+    echo
+
+    if ! command -v nft >/dev/null 2>&1 || ! nft list table inet crowdsec_guard >/dev/null 2>&1; then
+        warn '未检测到 crowdsec_guard 防火墙。'
+        warn '请先执行第 5 步安装 CrowdSec + nftables，再使用端口管理。'
+        return 1
+    fi
+
+    log '启动 CrowdSec Guard TCP 端口管理器。'
+    warn '端口管理器执行完成后选择 0，会返回本菜单。'
+    run_remote_script "$SCRIPT_PORT_MANAGER"
+}
+
 show_status() {
     local ssh_port='unknown'
     local pubkey='unknown'
@@ -267,6 +282,14 @@ show_status() {
         echo '规则已加载'
     else
         echo '未检测到'
+    fi
+
+    printf '自定义 TCP 端口:  '
+    if [[ -s /etc/crowdsec-guard/custom-tcp-ports.conf ]]; then
+        tr '\n' ' ' </etc/crowdsec-guard/custom-tcp-ports.conf
+        echo
+    else
+        echo '无'
     fi
 
     echo
@@ -359,7 +382,8 @@ print_menu() {
     echo '【辅助功能】'
     echo
     echo '6) 一键按 1 → 5 顺序执行全部步骤'
-    echo '7) 查看当前状态'
+    echo '7) CrowdSec Guard 端口管理'
+    echo '8) 查看当前状态'
     echo '0) 退出'
     echo
 }
@@ -369,7 +393,7 @@ main_loop() {
 
     while true; do
         print_menu
-        printf '请选择 [0-7]: ' >"$TTY"
+        printf '请选择 [0-8]: ' >"$TTY"
         IFS= read -r choice <"$TTY" || choice='0'
 
         case "$choice" in
@@ -398,6 +422,10 @@ main_loop() {
                 pause_menu
                 ;;
             7)
+                run_port_manager || true
+                pause_menu
+                ;;
+            8)
                 show_status || true
                 pause_menu
                 ;;
@@ -407,7 +435,7 @@ main_loop() {
                 exit 0
                 ;;
             *)
-                warn '无效选择，请输入 0-7。'
+                warn '无效选择，请输入 0-8。'
                 sleep 1
                 ;;
         esac

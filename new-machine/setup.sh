@@ -5,13 +5,14 @@ IFS=$'\n\t'
 # ============================================================
 # New Machine Setup - Debian
 #
-# 统一调用仓库中的新机配置脚本：
+# 推荐执行顺序：
 #   1. Debian VPS / TCP 调优
 #   2. SSH 密钥管理
 #   3. 3x-ui 安装
 #   4. Cloudflared 自动更新任务
-#   5. CrowdSec + nftables 防火墙
+#   5. CrowdSec + nftables 防火墙（最后执行）
 #
+# 菜单中的 1-5 就是实际推荐执行顺序。
 # 菜单循环运行，只有选择 0 才退出。
 # ============================================================
 
@@ -131,8 +132,9 @@ run_remote_script() {
 
 run_tuning() {
     echo
-    warn '此操作会运行 Debian VPS/TCP 调优脚本，并可能修改系统网络参数。'
-    ask_yes_no '确认继续吗？' || {
+    warn '【第 1 步】Debian VPS / TCP 调优。'
+    warn '此操作可能修改系统网络参数。'
+    ask_yes_no '确认执行第 1 步吗？' || {
         warn '已取消。'
         return 0
     }
@@ -142,16 +144,17 @@ run_tuning() {
 
 run_ssh_manager() {
     echo
-    log '启动 SSH Key Manager。'
+    log '【第 2 步】启动 SSH Key Manager。'
     warn 'SSH 子脚本本身也是循环菜单；在 SSH 菜单中选择 0 后会返回本菜单。'
     run_remote_script "$SCRIPT_SSH"
 }
 
 run_3xui() {
     echo
-    warn '3x-ui 安装脚本会要求输入域名、管理员账号和密码。'
+    warn '【第 3 步】安装 3x-ui。'
+    warn '脚本会要求输入域名、管理员账号和密码。'
     warn '默认面板端口为 8443，ACME HTTP-01 使用 80 端口。'
-    ask_yes_no '确认安装 3x-ui 吗？' || {
+    ask_yes_no '确认执行第 3 步吗？' || {
         warn '已取消。'
         return 0
     }
@@ -166,6 +169,7 @@ cloudflared_installed() {
 
 run_cloudflared_update() {
     echo
+    log '【第 4 步】配置 Cloudflared 自动更新。'
 
     if ! cloudflared_installed; then
         warn '当前没有检测到通过 APT 安装的 cloudflared。'
@@ -178,12 +182,13 @@ run_cloudflared_update() {
 
 run_crowdsec() {
     echo
+    warn '【第 5 步 / 最后一步】安装 CrowdSec + nftables 防火墙。'
     warn 'CrowdSec 脚本会安装 nftables Firewall Bouncer，并接管主机入站防火墙。'
     warn '最终公网仅允许 80、443 和确认后的 SSH 端口；8443 公网访问会被阻止。'
-    warn '建议把 CrowdSec 放在新机配置流程最后执行。'
+    warn '因此这一项固定建议最后执行。'
     echo
 
-    ask_yes_no '确认安装 CrowdSec 并应用防火墙吗？' || {
+    ask_yes_no '确认执行最后一步吗？' || {
         warn '已取消。'
         return 0
     }
@@ -270,65 +275,66 @@ show_status() {
 run_recommended_flow() {
     echo
     echo '============================================================'
-    echo ' 推荐新机初始化流程'
+    echo ' 按推荐顺序执行全部步骤'
     echo '============================================================'
     echo
-    echo '执行顺序：'
+    echo '将严格按照菜单 1 → 5 执行：'
+    echo
     echo '  1. Debian VPS / TCP 调优'
     echo '  2. SSH 密钥管理'
     echo '  3. 3x-ui'
     echo '  4. Cloudflared 自动更新（仅 cloudflared 已安装时）'
     echo '  5. CrowdSec + nftables（最后执行）'
     echo
-    warn '该流程仍会保留各子脚本自己的安全确认和交互输入。'
-    warn 'SSH Key Manager 内需要选择 0 退出后，才会继续下一步。'
+    warn '各子脚本自己的安全确认和交互输入仍然保留。'
+    warn 'SSH Key Manager 内需要选择 0 退出后，才会继续第 3 步。'
     echo
 
-    ask_yes_no '确认开始推荐流程吗？' || {
+    ask_yes_no '确认按 1 → 5 顺序开始执行吗？' || {
         warn '已取消。'
         return 0
     }
 
     echo
-    log '[1/5] Debian VPS / TCP 调优'
+    log '[第 1 步 / 5] Debian VPS / TCP 调优'
     if ! run_remote_script "$SCRIPT_TUNING"; then
-        warn 'TCP 调优失败，推荐流程停止。'
+        warn '第 1 步执行失败，流程停止。'
         return 1
     fi
 
     echo
-    log '[2/5] SSH Key Manager'
+    log '[第 2 步 / 5] SSH Key Manager'
     if ! run_remote_script "$SCRIPT_SSH"; then
-        warn 'SSH 配置脚本执行失败，推荐流程停止。'
+        warn '第 2 步执行失败，流程停止。'
         return 1
     fi
 
     echo
-    log '[3/5] 3x-ui'
+    log '[第 3 步 / 5] 3x-ui'
     if ! run_remote_script "$SCRIPT_3XUI"; then
-        warn '3x-ui 安装失败，推荐流程停止。'
+        warn '第 3 步执行失败，流程停止。'
         return 1
     fi
 
     echo
-    log '[4/5] Cloudflared 自动更新'
+    log '[第 4 步 / 5] Cloudflared 自动更新'
     if cloudflared_installed; then
         if ! run_remote_script "$SCRIPT_CLOUDFLARED" install; then
-            warn 'Cloudflared 自动更新配置失败，继续进入 CrowdSec 前请自行确认。'
-            if ! ask_yes_no '仍然继续安装 CrowdSec 吗？'; then
+            warn '第 4 步执行失败。'
+            if ! ask_yes_no '是否仍然继续执行最后一步 CrowdSec？'; then
                 return 1
             fi
         fi
     else
-        warn '未检测到 APT 安装的 cloudflared，跳过自动更新配置。'
+        warn '未检测到 APT 安装的 cloudflared，第 4 步自动跳过。'
     fi
 
     echo
-    log '[5/5] CrowdSec + nftables'
-    warn '这是最后一步，会收紧公网入站端口。'
+    log '[第 5 步 / 5] CrowdSec + nftables'
+    warn '最后一步会收紧公网入站端口。'
 
-    if ! ask_yes_no '确认继续执行 CrowdSec 防火墙配置吗？'; then
-        warn '已跳过 CrowdSec。'
+    if ! ask_yes_no '确认执行最后一步 CrowdSec 防火墙配置吗？'; then
+        warn '已跳过第 5 步 CrowdSec。'
         return 0
     fi
 
@@ -342,12 +348,17 @@ print_menu() {
     echo ' New Machine Setup - Debian'
     echo '============================================================'
     echo
-    echo '1) Debian VPS / TCP 调优'
-    echo '2) SSH 密钥管理'
-    echo '3) 安装 3x-ui'
-    echo '4) 安装 Cloudflared 自动更新任务'
-    echo '5) 安装 CrowdSec + nftables 防火墙'
-    echo '6) 执行推荐新机初始化流程'
+    echo '【推荐执行顺序：从 1 开始依次往下执行】'
+    echo
+    echo '1) 第 1 步：Debian VPS / TCP 调优'
+    echo '2) 第 2 步：SSH 密钥管理'
+    echo '3) 第 3 步：安装 3x-ui'
+    echo '4) 第 4 步：安装 Cloudflared 自动更新任务'
+    echo '5) 第 5 步：安装 CrowdSec + nftables 防火墙（最后）'
+    echo
+    echo '【辅助功能】'
+    echo
+    echo '6) 一键按 1 → 5 顺序执行全部步骤'
     echo '7) 查看当前状态'
     echo '0) 退出'
     echo

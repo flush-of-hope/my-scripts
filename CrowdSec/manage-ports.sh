@@ -22,10 +22,10 @@ readonly CHAIN='input'
 readonly GUARD_SERVICE='crowdsec-guard-fw.service'
 readonly GUARD_HELPER='/usr/local/sbin/crowdsec-guard-fw'
 readonly GUARD_DIR='/etc/crowdsec-guard'
-readonly PORTS_FILE='${GUARD_DIR}/custom-tcp-ports.conf'
+readonly PORTS_FILE="${GUARD_DIR}/custom-tcp-ports.conf"
 readonly CUSTOM_HELPER='/usr/local/sbin/crowdsec-guard-custom-ports'
 readonly DROPIN_DIR='/etc/systemd/system/crowdsec-guard-fw.service.d'
-readonly DROPIN_FILE='${DROPIN_DIR}/custom-ports.conf'
+readonly DROPIN_FILE="${DROPIN_DIR}/custom-ports.conf"
 
 green='\033[1;32m'
 yellow='\033[1;33m'

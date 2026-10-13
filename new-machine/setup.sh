@@ -2,9 +2,10 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-readonly SETUP_VERSION='2026-10-13.2'
+readonly SETUP_VERSION='2026-10-13.3'
 readonly TTY='/dev/tty'
 readonly RAW_BASE='https://raw.githubusercontent.com/flush-of-hope/my-scripts/main'
+readonly LAUNCHER_PATH='/usr/local/bin/vps-setup'
 
 readonly SCRIPT_TUNING='https://raw.githubusercontent.com/Kylin010/tcpfit/main/tcpfit.sh'
 readonly SCRIPT_DIAGNOSTICS='https://raw.githubusercontent.com/xykt/ScriptMenu/main/menu.sh'
@@ -40,7 +41,7 @@ pause_menu() {
 
 check_environment() {
     [[ $EUID -eq 0 ]] || fatal '请使用 root 权限运行。'
-    [[ -r "$TTY" && -w "$TTY" ]] || fatal '需要在交互式终端中运行。'
+    [[ "${1:-}" == '--install' || ( -r "$TTY" && -w "$TTY" ) ]] || fatal '需要在交互式终端中运行。'
     [[ -f /etc/debian_version ]] || fatal '此入口脚本仅支持 Debian / Ubuntu。'
 
     if ! command -v curl >/dev/null 2>&1; then
@@ -107,6 +108,74 @@ run_remote_script() {
     fi
 
     return "$rc"
+}
+
+install_launcher() {
+    local tmp
+
+    if ! mkdir -p -- "${LAUNCHER_PATH%/*}"; then
+        error '无法创建快捷命令安装目录。'
+        return 1
+    fi
+    tmp="$(mktemp "${LAUNCHER_PATH%/*}/.vps-setup.XXXXXX")" || {
+        error '无法创建快捷命令临时文件。'
+        return 1
+    }
+
+    if ! cat >"$tmp" <<'LAUNCHER'
+#!/usr/bin/env bash
+# Managed by flush-of-hope/my-scripts/new-machine/setup.sh
+set -Eeuo pipefail
+
+readonly SCRIPT_URL='https://raw.githubusercontent.com/flush-of-hope/my-scripts/main/new-machine/setup.sh'
+
+if [[ $EUID -ne 0 ]]; then
+    echo '请使用 root 运行，或执行 sudo vps-setup。' >&2
+    exit 1
+fi
+if ! command -v curl >/dev/null 2>&1; then
+    echo '未检测到 curl，请先安装 curl 和 ca-certificates。' >&2
+    exit 1
+fi
+
+tmp="$(mktemp -t vps-setup.XXXXXX)"
+trap 'rm -f -- "$tmp"' EXIT
+cache_buster="$(date +%s%N 2>/dev/null || date +%s)"
+
+echo '[+] 正在获取最新的 VPS Setup 脚本...'
+if ! curl \
+    --fail --show-error --silent --location \
+    --header 'Cache-Control: no-cache' \
+    --header 'Pragma: no-cache' \
+    --proto '=https' --proto-redir '=https' \
+    --connect-timeout 15 --max-time 120 \
+    -o "$tmp" "${SCRIPT_URL}?cb=${cache_buster}"; then
+    echo '获取最新脚本失败，请检查网络后重试。' >&2
+    exit 1
+fi
+
+if [[ ! -s "$tmp" ]] || ! bash -n "$tmp"; then
+    echo '下载的脚本为空或语法无效，请稍后重试。' >&2
+    exit 1
+fi
+
+bash "$tmp" "$@"
+LAUNCHER
+    then
+        rm -f -- "$tmp"
+        error '生成快捷命令失败。'
+        return 1
+    fi
+
+    if ! bash -n "$tmp" || ! chmod 755 "$tmp" || ! mv -f -- "$tmp" "$LAUNCHER_PATH"; then
+        rm -f -- "$tmp"
+        error '安装快捷命令失败。'
+        return 1
+    fi
+
+    log "快捷命令已安装：${LAUNCHER_PATH}"
+    log '以后输入 vps-setup 即可运行；非 root 用户执行 sudo vps-setup。'
+    log '每次运行都会重新获取 GitHub main 分支的最新脚本。'
 }
 
 run_tuning() {
@@ -405,6 +474,7 @@ print_menu() {
     echo '8) 查看当前状态'
     echo '9) VPS 质量检测菜单（IP / 网络 / 硬件）'
     echo '10) 安装 / 更新软件（输入软件包名称）'
+    echo '11) 安装 / 更新快捷命令 vps-setup（每次获取最新版）'
     echo '0) 退出'
     echo
 }
@@ -414,7 +484,7 @@ main_loop() {
 
     while true; do
         print_menu
-        printf '请选择 [0-10]: ' >"$TTY"
+        printf '请选择 [0-11]: ' >"$TTY"
         IFS= read -r choice <"$TTY" || choice='0'
 
         case "$choice" in
@@ -428,12 +498,16 @@ main_loop() {
             8) show_status || true; pause_menu ;;
             9) run_diagnostics || true; pause_menu ;;
             10) run_package_manager || true; pause_menu ;;
+            11) install_launcher || true; pause_menu ;;
             0) echo; log '已退出 New Machine Setup。'; exit 0 ;;
-            *) warn '无效选择，请输入 0-10。'; sleep 1 ;;
+            *) warn '无效选择，请输入 0-11。'; sleep 1 ;;
         esac
     done
 }
 
-check_environment
-main_loop
+case "${1:-}" in
+    --install) check_environment --install; install_launcher ;;
+    '') check_environment; main_loop ;;
+    *) fatal '用法：setup.sh [--install]（--install 仅安装快捷命令）。' ;;
+esac
 

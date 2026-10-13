@@ -116,20 +116,50 @@ collect_inputs() {
     [[ "$origin_url" =~ $origin_pattern ]] || die '源站地址需使用 http/https/ssh/tcp://主机[:端口]，不包含路径或密码。'
     local port="${BASH_REMATCH[5]:-}"
     [[ -z "$port" ]] || (( 10#$port >= 1 && 10#$port <= 65535 )) || die '源站端口需为 1–65535。'
-    origin_server_name=''
-    no_tls_verify=false
+    origin_request_json='{}'
     if [[ "$origin_url" == https://* ]]; then
+        log '配置此公开应用路由的源站 TLS 参数。'
+        origin_server_name=''
+        no_tls_verify=false
+        match_sni_to_host=false
+        http2_origin=false
+        ca_pool=''
+        tls_timeout=10
         prompt origin_server_name '源站 HTTPS 证书对应的域名' "$public_hostname"
         origin_server_name="${origin_server_name,,}"
         valid_domain "$origin_server_name" || die '源站证书域名格式无效。'
         if yes_no '源站使用自签名证书，是否跳过源站 TLS 证书验证？'; then
             no_tls_verify=true
         fi
+        if yes_no 'SNI 是否跟随请求 Host（Match SNI to host）？'; then
+            match_sni_to_host=true
+            log '已启用 Match SNI to host：SNI 将使用请求 Host，优先于上面填写的证书域名。'
+        fi
+        if [[ "$no_tls_verify" == false ]]; then
+            prompt ca_pool '自定义 CA 证书文件的绝对路径（可选，回车使用系统 CA）'
+            if [[ -n "$ca_pool" ]]; then
+                [[ "$ca_pool" == /* && -f "$ca_pool" && -r "$ca_pool" ]] || die 'CA 证书必须是本机可读取的文件，并使用绝对路径。'
+                grep -F -- '-----BEGIN CERTIFICATE-----' "$ca_pool" >/dev/null || die 'CA 文件需要包含 PEM 格式的证书。'
+            fi
+        fi
+        prompt tls_timeout '源站 TLS 握手超时（整数秒，1–86400）' '10'
+        [[ "$tls_timeout" =~ ^[0-9]+$ ]] || die 'TLS 超时需为整数秒，例如 10。'
+        tls_timeout="$(jq -en --arg value "$tls_timeout" '$value | tonumber | select(. >= 1 and . <= 86400)')" || die 'TLS 超时需在 1–86400 秒之间。'
+        if yes_no '是否使用 HTTP/2 连接 HTTPS 源站？'; then
+            http2_origin=true
+        fi
+        origin_request_json="$(jq -cn --arg name "$origin_server_name" --arg ca "$ca_pool" --argjson timeout "$tls_timeout" \
+            --argjson insecure "$no_tls_verify" --argjson sni "$match_sni_to_host" --argjson http2 "$http2_origin" \
+            '{originServerName: $name, noTLSVerify: $insecure, matchSNItoHost: $sni, caPool: $ca, tlsTimeout: $timeout, http2Origin: $http2}')"
     fi
     echo
     printf 'Zone:   %s\n域名:   %s\n隧道:   %s\n源站:   %s\n' "$zone_name" "$public_hostname" "$tunnel_name" "$origin_url"
-    [[ "$no_tls_verify" == false ]] || warn '已选择跳过源站 TLS 证书验证。'
-    yes_no '确认创建 / 更新以上域名和隧道，并启动本机连接服务？' || { log '已取消。'; exit 0; }
+    if [[ "$origin_url" == https://* ]]; then
+        printf '源站 TLS: 证书域名=%s，跳过验证=%s，SNI 跟随 Host=%s\n' "$origin_server_name" "$no_tls_verify" "$match_sni_to_host"
+        printf '          CA=%s，握手超时=%s 秒，源站 HTTP/2=%s\n' "${ca_pool:-系统默认}" "$tls_timeout" "$http2_origin"
+        [[ "$no_tls_verify" == false ]] || warn '已选择跳过源站 TLS 证书验证。'
+    fi
+    yes_no '确认创建 / 更新以上隧道、公开应用路由和 DNS，并启动本机连接服务？' || { log '已取消。'; exit 0; }
 }
 
 prepare_resources() {
@@ -170,14 +200,14 @@ prepare_resources() {
 }
 
 merge_ingress() {
-    jq --arg host "$public_hostname" --arg service "$origin_url" --arg server_name "$origin_server_name" --argjson insecure "$no_tls_verify" '
+    jq --arg host "$public_hostname" --arg service "$origin_url" --argjson origin "$origin_request_json" '
         . as $config | (.ingress // []) as $rules |
-        (if $server_name == "" then {} else {originServerName: $server_name, noTLSVerify: $insecure} end) as $origin |
         [$rules[] | select(.hostname == $host and (.path // "") != "")] as $paths |
         [$rules[] | select((.hostname // "") != "" or (.path // "") != "") | select(.hostname != $host)] as $keep |
         ([$rules[] | select(.hostname == $host and (.path // "") == "")] | first // {}) as $previous |
         ([$rules[] | select((.hostname // "") == "" and (.path // "") == "")] | last // {service: "http_status:404"}) as $fallback |
-        ($previous + {hostname: $host, service: $service, originRequest: (($previous.originRequest // {}) + $origin)}) as $route |
+        (($previous.originRequest // {}) | del(.originServerName, .noTLSVerify, .matchSNItoHost, .caPool, .tlsTimeout, .http2Origin)) as $previous_origin |
+        ($previous + {hostname: $host, service: $service, originRequest: ($previous_origin + $origin)}) as $route |
         {config: ($config + {ingress: ($paths + [$route] + $keep + [$fallback])})}
     ' "$1" >"$2"
 }
@@ -216,7 +246,15 @@ apply_resources() {
     # Check token access before changing hostname routes.
     api_request GET "/accounts/${account_id}/cfd_tunnel/${tunnel_id}/token" "$WORK_DIR/token.json"
     jq -er '.result | select(type == "string" and length > 0)' "$WORK_DIR/token.json" >"$WORK_DIR/tunnel.token"
+    log "创建 / 更新公开应用路由：${public_hostname} → ${origin_url}。"
     api_request PUT "/accounts/${account_id}/cfd_tunnel/${tunnel_id}/configurations" "$WORK_DIR/configured.json" "$WORK_DIR/new-config.json"
+    api_request GET "/accounts/${account_id}/cfd_tunnel/${tunnel_id}/configurations" "$WORK_DIR/saved-config.json"
+    jq -e --arg host "$public_hostname" --arg service "$origin_url" --argjson origin "$origin_request_json" '
+        def tls_defaults: {originServerName: "", noTLSVerify: false, matchSNItoHost: false, caPool: "", tlsTimeout: 10, http2Origin: false};
+        [.result.config.ingress[] | select(.hostname == $host and (.path // "") == "")] |
+        length == 1 and (.[0].service == $service) and ((tls_defaults + (.[0].originRequest // {})) | contains($origin))
+    ' "$WORK_DIR/saved-config.json" >/dev/null || die '路由或 TLS 参数保存后的校验失败，请检查 Cloudflare 路由配置。'
+    log '公开应用路由及源站 TLS 参数已保存并校验。'
     if [[ -z "$dns_id" ]]; then
         log '创建代理 CNAME 解析...'
         jq -n --arg host "$public_hostname" --arg target "${tunnel_id}.cfargotunnel.com" \
@@ -253,8 +291,8 @@ WantedBy=multi-user.target
 SERVICE
     install -m 0644 "$WORK_DIR/service" "$UNIT_FILE"
     jq -n --arg zone_id "$zone_id" --arg account_id "$account_id" --arg tunnel_id "$tunnel_id" --arg dns_id "$dns_id" \
-        --arg hostname "$public_hostname" --arg origin "$origin_url" --arg unit "$unit" \
-        '{zone_id: $zone_id, account_id: $account_id, tunnel_id: $tunnel_id, dns_id: $dns_id, hostname: $hostname, origin: $origin, unit: $unit}' >"$WORK_DIR/state.json"
+        --arg hostname "$public_hostname" --arg origin "$origin_url" --arg unit "$unit" --argjson origin_request "$origin_request_json" \
+        '{zone_id: $zone_id, account_id: $account_id, tunnel_id: $tunnel_id, dns_id: $dns_id, hostname: $hostname, origin: $origin, origin_request: $origin_request, unit: $unit}' >"$WORK_DIR/state.json"
     install -m 0600 "$WORK_DIR/state.json" "$STATE_DIR/${public_hostname}.json"
     systemctl daemon-reload
     systemctl enable "$unit"
@@ -282,7 +320,8 @@ main() {
     trap cleanup EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM
-    local zone_name public_hostname tunnel_name origin_url origin_server_name no_tls_verify
+    local zone_name public_hostname tunnel_name origin_url origin_server_name no_tls_verify origin_request_json
+    local match_sni_to_host ca_pool tls_timeout http2_origin
     local zone_id account_id dns_id
     collect_inputs
     prepare_resources

@@ -4,7 +4,7 @@
 
 ## 使用方法
 
-以 root 运行 `vps-setup`，选择 **12) 自动创建 CF 隧道 / 域名解析**。
+以 root 运行 `vps-setup`，选择 **12) 自动创建 CF 隧道 / 路由 / 域名解析（支持 TLS 设置）**。
 
 也可以独立运行：
 
@@ -40,7 +40,28 @@ Account 资源选择隧道所属账户，Zone 资源选择要使用的域名。Z
 
 Zone 应填写 Cloudflare 控制台中实际管理的域名，委派的子域也应填写该子域本身。域名需要在 Cloudflare 中处于 active 状态。
 
-HTTPS 源站默认验证证书并设置 Origin Server Name。只有明确选择自签名证书选项，才会启用 `noTLSVerify`。
+## 自动创建路由和 TLS 设置
+
+创建或复用隧道后，脚本会自动保存公开应用路由：`完整公开域名 → 本地服务地址`，再读取 Cloudflare 配置验证域名、源站地址和 TLS 参数是否正确，最后配置 DNS。
+
+当本地服务地址使用 `https://` 时，可逐项设置以下参数：
+
+| 参数 | 作用 | 默认 |
+| --- | --- | --- |
+| `originServerName` | 源站证书对应的域名 | 完整公开域名 |
+| `noTLSVerify` | 是否关闭源站证书验证 | 关闭此选项，保持验证 |
+| `matchSNItoHost` | SNI 跟随请求 Host，优先于 `originServerName` | 不启用 |
+| `caPool` | 本机自定义 CA 证书文件的绝对路径 | 系统 CA |
+| `tlsTimeout` | 源站 TLS 握手超时 | `10s` |
+| `http2Origin` | 使用 HTTP/2 连接 HTTPS 源站 | 不启用 |
+
+CA 文件需要已存在于本服务器且为 PEM 证书。关闭证书验证时不再询问 CA 文件。超时输入整数秒，范围为 `1–86400`，例如输入 `10` 表示 10 秒；脚本按 Cloudflare API 要求提交数字秒数。
+
+同一隧道有多个连接副本时，自定义 CA 文件需在每个副本上使用相同路径。
+
+TLS 参数作用于 cloudflared 到本地源站这一段连接。HTTPS 源站默认验证证书；只有明确选择自签名证书选项，才会启用 `noTLSVerify`。
+
+重复配置会应用本次选择的 TLS 参数，同时保留该路由中的其他源站选项。将源站改为 HTTP / SSH / TCP 时，会移除该路由遗留的源站 TLS 参数。
 
 HTTP 示例：`http://127.0.0.1:8080`。SSH 示例：`ssh://127.0.0.1:24754`。SSH / TCP 公开服务需要客户端使用 cloudflared，不能直接当作普通 SSH IP 或端口连接。
 
@@ -69,7 +90,7 @@ journalctl -u 'cloudflared-vps-setup@<隧道ID>.service' -n 50 --no-pager
 
 完成后可选择 `vps-setup` 第 4 项安装每日自动更新任务。已有自动更新任务需要再执行第 4 项一次，更新到支持独立隧道服务的版本。只有 cloudflared 版本发生变化时，更新任务才会重启正在运行的默认服务和 vps-setup 隧道服务。
 
-配置摘要保存在 `/var/lib/vps-setup/cloudflare/<公开域名>.json`，不包含 API Token 或连接 Token。
+配置摘要（包括本次 TLS 参数）保存在 `/var/lib/vps-setup/cloudflare/<公开域名>.json`，不包含 API Token 或连接 Token。
 
 ## 官方参考
 
@@ -77,3 +98,4 @@ journalctl -u 'cloudflared-vps-setup@<隧道ID>.service' -n 50 --no-pager
 - [Zone 查询接口及权限](https://developers.cloudflare.com/api/resources/zones/methods/list/)
 - [cloudflared 官方 APT 软件源](https://pkg.cloudflare.com/)
 - [Tunnel 启动参数](https://developers.cloudflare.com/tunnel/reference/run-parameters/)
+- [公开应用路由的源站 TLS 参数](https://developers.cloudflare.com/tunnel/reference/origin-parameters/)

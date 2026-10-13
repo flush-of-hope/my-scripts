@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-readonly SETUP_VERSION='2026-10-13.4'
+readonly SETUP_VERSION='2026-10-13.5'
 readonly TTY='/dev/tty'
 readonly RAW_BASE='https://raw.githubusercontent.com/flush-of-hope/my-scripts/main'
 readonly LAUNCHER_PATH='/usr/local/bin/vps-setup'
@@ -273,7 +273,7 @@ run_cloudflared_update() {
 
 run_cf_tunnel() {
     echo
-    log '自动创建 / 配置 Cloudflare Tunnel 和域名解析。'
+    log '自动创建 / 配置 Cloudflare Tunnel、公开应用路由、TLS 和域名解析。'
     run_remote_script "$SCRIPT_CF_TUNNEL"
 }
 
@@ -482,7 +482,7 @@ print_menu() {
     echo '9) VPS 质量检测菜单（IP / 网络 / 硬件）'
     echo '10) 安装 / 更新软件（输入软件包名称）'
     echo '11) 安装 / 更新快捷命令 vps-setup（每次获取最新版）'
-    echo '12) 自动创建 CF 隧道 / 域名解析'
+    echo '12) 自动创建 CF 隧道 / 路由 / 域名解析（支持 TLS 设置）'
     echo '0) 退出'
     echo
 }

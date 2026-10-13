@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-readonly SETUP_VERSION='2026-10-13.3'
+readonly SETUP_VERSION='2026-10-13.4'
 readonly TTY='/dev/tty'
 readonly RAW_BASE='https://raw.githubusercontent.com/flush-of-hope/my-scripts/main'
 readonly LAUNCHER_PATH='/usr/local/bin/vps-setup'
@@ -12,6 +12,7 @@ readonly SCRIPT_DIAGNOSTICS='https://raw.githubusercontent.com/xykt/ScriptMenu/m
 readonly SCRIPT_SSH='linux/ssh/notPasswordLogin.sh'
 readonly SCRIPT_3XUI='3x-ui/install-3x-ui.sh'
 readonly SCRIPT_CLOUDFLARED='cloudflare/cloudflared-auto-update-installer.sh'
+readonly SCRIPT_CF_TUNNEL='cloudflare/create-tunnel.sh'
 readonly SCRIPT_CROWDSEC='CrowdSec/install-crowdsec-guard.sh'
 readonly SCRIPT_GUARD_INIT='CrowdSec/init-guard.sh'
 readonly SCRIPT_PORT_MANAGER='CrowdSec/manage-ports.sh'
@@ -270,6 +271,12 @@ run_cloudflared_update() {
     run_remote_script "$SCRIPT_CLOUDFLARED" install
 }
 
+run_cf_tunnel() {
+    echo
+    log '自动创建 / 配置 Cloudflare Tunnel 和域名解析。'
+    run_remote_script "$SCRIPT_CF_TUNNEL"
+}
+
 run_crowdsec() {
     echo
     warn '【第 5 步 / 最后一步】安装 CrowdSec + nftables 防火墙。'
@@ -475,6 +482,7 @@ print_menu() {
     echo '9) VPS 质量检测菜单（IP / 网络 / 硬件）'
     echo '10) 安装 / 更新软件（输入软件包名称）'
     echo '11) 安装 / 更新快捷命令 vps-setup（每次获取最新版）'
+    echo '12) 自动创建 CF 隧道 / 域名解析'
     echo '0) 退出'
     echo
 }
@@ -484,7 +492,7 @@ main_loop() {
 
     while true; do
         print_menu
-        printf '请选择 [0-11]: ' >"$TTY"
+        printf '请选择 [0-12]: ' >"$TTY"
         IFS= read -r choice <"$TTY" || choice='0'
 
         case "$choice" in
@@ -499,8 +507,9 @@ main_loop() {
             9) run_diagnostics || true; pause_menu ;;
             10) run_package_manager || true; pause_menu ;;
             11) install_launcher || true; pause_menu ;;
+            12) run_cf_tunnel || true; pause_menu ;;
             0) echo; log '已退出 New Machine Setup。'; exit 0 ;;
-            *) warn '无效选择，请输入 0-11。'; sleep 1 ;;
+            *) warn '无效选择，请输入 0-12。'; sleep 1 ;;
         esac
     done
 }

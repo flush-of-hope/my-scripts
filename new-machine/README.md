@@ -74,6 +74,7 @@ vps-setup
 9) VPS 质量检测菜单（IP / 网络 / 硬件）
 10) 安装 / 更新软件（输入软件包名称）
 11) 安装 / 更新快捷命令 vps-setup（每次获取最新版）
+12) 自动创建 CF 隧道 / 域名解析
 0) 退出
 ```
 
@@ -291,6 +292,18 @@ CrowdSec 脚本应用防火墙后带 SSH 安全验证和自动回滚机制。
 - 3x-ui 仍需要输入域名、账号和密码
 
 ---
+
+# Cloudflare 隧道自动创建
+
+## 自动创建 Cloudflare 隧道和域名解析
+
+选择 **12) 自动创建 CF 隧道 / 域名解析**，按提示输入 Cloudflare API Token、Zone 域名、完整公开域名、隧道名称及本地服务地址。脚本自动查询 Account ID / Zone ID，创建或复用隧道，配置路由和代理 CNAME，并启用 systemd 开机启动。
+
+API Token 需要 Account / Cloudflare Tunnel / Edit、Zone / DNS / Edit、Zone / Zone / Read 权限。Token 仅在服务器本次运行中使用。
+
+同名远程管理隧道可重复配置；已有其他 DNS 解析会提示冲突并停止。新服务与原有 `cloudflared.service` 独立。完成后可以执行第 4 项安装自动更新。
+
+详见 [Cloudflare 自动配置说明](../cloudflare/README.md)。此功能单独运行，不自动加入新机 1 → 5 流程。
 
 # 查看服务器当前状态
 

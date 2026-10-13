@@ -30,8 +30,10 @@ check_environment() {
         | grep -q '^install ok installed$' \
         || die "未检测到通过 APT 安装的 cloudflared。"
 
-    systemctl cat cloudflared.service >/dev/null 2>&1 \
-        || die "未找到 cloudflared.service，请先确认 Tunnel 服务已安装。"
+    if ! systemctl cat cloudflared.service >/dev/null 2>&1 &&
+        ! systemctl cat cloudflared-vps-setup@.service >/dev/null 2>&1; then
+        die "未找到 cloudflared 或 vps-setup Tunnel 服务，请先安装隧道。"
+    fi
 }
 
 install_task() {
@@ -89,14 +91,24 @@ if [[ "${old_version}" == "${new_version}" ]]; then
 fi
 
 log "版本已更新：${old_version} -> ${new_version}"
-log "正在重启 cloudflared.service……"
-
-if systemctl restart cloudflared.service; then
-    log "cloudflared.service 重启成功。"
-else
-    log "cloudflared.service 重启失败，请立即检查服务状态。"
-    exit 1
+log "正在重启已运行的 Cloudflared Tunnel 服务……"
+units="$(systemctl list-units --type=service --state=active --no-legend --plain \
+    cloudflared.service 'cloudflared-vps-setup@*.service' | awk '{print $1}')"
+if [[ -z "${units}" ]]; then
+    log "当前没有正在运行的 Tunnel 服务，无需重启。"
+    exit 0
 fi
+failed=0
+while IFS= read -r unit; do
+    [[ -n "${unit}" ]] || continue
+    if systemctl restart "${unit}"; then
+        log "${unit} 重启成功。"
+    else
+        log "${unit} 重启失败，请立即检查服务状态。"
+        failed=1
+    fi
+done <<<"${units}"
+exit "${failed}"
 UPDATE_SCRIPT_EOF
 
     chmod 0755 "${UPDATE_SCRIPT}"
@@ -135,7 +147,7 @@ TIMER_EOF
     systemctl enable --now "${TIMER_NAME}"
 
     log "安装完成。每天 04:30 检查更新，并随机延迟 0～30 分钟。"
-    log "只有版本发生变化时才会重启 cloudflared.service。"
+    log "只有版本发生变化时才会重启已运行的 cloudflared / vps-setup Tunnel 服务。"
     printf '\n'
     systemctl list-timers "${TIMER_NAME}" --no-pager
     printf '\n常用命令：\n'
@@ -188,3 +200,4 @@ case "${1:-install}" in
         exit 2
         ;;
 esac
+

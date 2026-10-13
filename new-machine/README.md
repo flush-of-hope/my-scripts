@@ -23,6 +23,30 @@ sudo ./setup.sh
 
 > 建议使用 `root` 运行。
 
+## 安装快捷命令（每次获取最新版）
+
+在服务器上以 `root` 执行一次：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/flush-of-hope/my-scripts/main/new-machine/setup.sh) --install
+```
+
+也可以先打开主菜单，选择 **11) 安装 / 更新快捷命令 vps-setup**。
+
+安装完成后，直接执行：
+
+```bash
+vps-setup
+```
+
+非 root 用户执行 `sudo vps-setup`。
+
+快捷命令安装在 `/usr/local/bin/vps-setup`。每次运行都从 GitHub `main` 分支重新下载最新的 `setup.sh`，通过时间戳查询参数和禁止缓存请求头避免复用旧响应；下载失败、文件为空或语法检查失败时退出。退出后自动删除临时文件。
+
+无需为菜单脚本的后续更新重新安装。需要更新快捷命令本身时，再执行一次安装命令或选择第 11 项即可。
+
+安装依赖 `curl`；若机器尚未安装，可先执行 `apt-get update && apt-get install -y curl ca-certificates`。
+
 ---
 
 ## 菜单
@@ -36,7 +60,7 @@ sudo ./setup.sh
 
 【推荐执行顺序：从 1 开始依次往下执行】
 
-1) 第 1 步：Debian VPS / TCP 调优
+1) 第 1 步：tcpfit / TCP 调优
 2) 第 2 步：SSH 密钥管理
 3) 第 3 步：安装 3x-ui
 4) 第 4 步：安装 Cloudflared 自动更新任务
@@ -45,7 +69,11 @@ sudo ./setup.sh
 【辅助功能】
 
 6) 一键按 1 → 5 顺序执行全部步骤
-7) 查看当前状态
+7) CrowdSec Guard 端口管理 / 自动兼容初始化
+8) 查看当前状态
+9) VPS 质量检测菜单（IP / 网络 / 硬件）
+10) 安装 / 更新软件（输入软件包名称）
+11) 安装 / 更新快捷命令 vps-setup（每次获取最新版）
 0) 退出
 ```
 
@@ -69,23 +97,15 @@ sudo ./setup.sh
 
 # 推荐执行顺序
 
-## 第 1 步：Debian VPS / TCP 调优
+## 第 1 步：tcpfit / TCP 调优
 
 调用：
 
-```text
-linux/tcp/Debian_VPS_Tuning.sh
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Kylin010/tcpfit/main/tcpfit.sh)
 ```
 
-主要用于 Debian VPS 的基础网络 / TCP 调优。
-
-该脚本还会自动检查：
-
-- `jq`
-- `curl`
-- `sha256sum`
-
-缺少依赖时自动安装。
+打开 tcpfit 的交互式菜单，用于机器画像检测、TCP 调优、状态验证和回滚。退出 tcpfit 后返回入口菜单，一键初始化也调用同一脚本。
 
 建议最先执行，因为这是基础系统和网络层配置。
 
@@ -241,7 +261,7 @@ CrowdSec 脚本应用防火墙后带 SSH 安全验证和自动回滚机制。
 会严格按照下面顺序运行：
 
 ```text
-1. Debian VPS / TCP 调优
+1. tcpfit / TCP 调优
         |
         v
 2. SSH 密钥管理
@@ -277,7 +297,7 @@ CrowdSec 脚本应用防火墙后带 SSH 安全验证和自动回滚机制。
 菜单：
 
 ```text
-7) 查看当前状态
+8) 查看当前状态
 ```
 
 会检查：
@@ -331,3 +351,4 @@ my-scripts/
     ├── setup.sh
     └── README.md
 ```
+

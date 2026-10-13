@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-readonly SETUP_VERSION='2026-10-13.1'
+readonly SETUP_VERSION='2026-10-13.2'
 readonly TTY='/dev/tty'
 readonly RAW_BASE='https://raw.githubusercontent.com/flush-of-hope/my-scripts/main'
 
@@ -123,6 +123,48 @@ run_diagnostics() {
     log '可选择 IP 质量、网络质量和硬件质量检测。'
     warn '退出检测子菜单后会返回本菜单。'
     run_remote_script "$SCRIPT_DIAGNOSTICS"
+}
+
+run_package_manager() {
+    local package='' status=''
+
+    echo
+    log '安装 / 更新软件（APT）。'
+    echo '输入软件包名称即可，例如 curl、wget、htop、git、nginx。'
+    printf '软件包名称（输入 0 或直接 Enter 返回）: ' >"$TTY"
+    IFS= read -r package <"$TTY" || return 0
+    package="${package#"${package%%[![:space:]]*}"}"
+    package="${package%"${package##*[![:space:]]}"}"
+
+    [[ -n "$package" && "$package" != '0' ]] || return 0
+
+    if [[ ! "$package" =~ ^[a-z0-9][a-z0-9+.-]+(:[a-z0-9][a-z0-9-]*)?$ ]]; then
+        error '请输入一个有效的软件包名称，例如 curl 或 libssl-dev。'
+        return 1
+    fi
+
+    log '刷新 APT 软件包索引...'
+    if ! apt-get update; then
+        error '软件包索引刷新失败，请检查网络和 APT 软件源。'
+        return 1
+    fi
+
+    status="$(dpkg-query -W -f='${Status}' "$package" 2>/dev/null || true)"
+    if [[ "$status" == 'install ok installed' ]]; then
+        log "${package} 已安装，正在检查并更新到软件源提供的最新版本..."
+        if ! apt-get install --only-upgrade -y -- "$package"; then
+            error "更新失败：${package}。"
+            return 1
+        fi
+    else
+        log "${package} 未安装，正在安装..."
+        if ! apt-get install -y -- "$package"; then
+            error "安装失败：${package}，请检查软件包名称和 APT 软件源。"
+            return 1
+        fi
+    fi
+
+    log "安装 / 更新完成：${package}。"
 }
 
 run_ssh_manager() {
@@ -362,6 +404,7 @@ print_menu() {
     echo '7) CrowdSec Guard 端口管理 / 自动兼容初始化'
     echo '8) 查看当前状态'
     echo '9) VPS 质量检测菜单（IP / 网络 / 硬件）'
+    echo '10) 安装 / 更新软件（输入软件包名称）'
     echo '0) 退出'
     echo
 }
@@ -371,7 +414,7 @@ main_loop() {
 
     while true; do
         print_menu
-        printf '请选择 [0-9]: ' >"$TTY"
+        printf '请选择 [0-10]: ' >"$TTY"
         IFS= read -r choice <"$TTY" || choice='0'
 
         case "$choice" in
@@ -384,8 +427,9 @@ main_loop() {
             7) run_port_manager || true; pause_menu ;;
             8) show_status || true; pause_menu ;;
             9) run_diagnostics || true; pause_menu ;;
+            10) run_package_manager || true; pause_menu ;;
             0) echo; log '已退出 New Machine Setup。'; exit 0 ;;
-            *) warn '无效选择，请输入 0-9。'; sleep 1 ;;
+            *) warn '无效选择，请输入 0-10。'; sleep 1 ;;
         esac
     done
 }

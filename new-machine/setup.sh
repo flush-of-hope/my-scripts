@@ -2,11 +2,12 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-readonly SETUP_VERSION='2026-09-20.1'
+readonly SETUP_VERSION='2026-10-13.1'
 readonly TTY='/dev/tty'
 readonly RAW_BASE='https://raw.githubusercontent.com/flush-of-hope/my-scripts/main'
 
-readonly SCRIPT_TUNING='linux/tcp/Debian_VPS_Tuning.sh'
+readonly SCRIPT_TUNING='https://raw.githubusercontent.com/Kylin010/tcpfit/main/tcpfit.sh'
+readonly SCRIPT_DIAGNOSTICS='https://raw.githubusercontent.com/xykt/ScriptMenu/main/menu.sh'
 readonly SCRIPT_SSH='linux/ssh/notPasswordLogin.sh'
 readonly SCRIPT_3XUI='3x-ui/install-3x-ui.sh'
 readonly SCRIPT_CLOUDFLARED='cloudflare/cloudflared-auto-update-installer.sh'
@@ -55,7 +56,11 @@ run_remote_script() {
 
     local cache_buster url tmp rc=0
     cache_buster="$(date +%s%N 2>/dev/null || date +%s)"
-    url="${RAW_BASE}/${path}?cb=${cache_buster}"
+    if [[ "$path" == https://* ]]; then
+        url="${path}?cb=${cache_buster}"
+    else
+        url="${RAW_BASE}/${path}?cb=${cache_buster}"
+    fi
     tmp="$(mktemp -t new-machine-script.XXXXXX)"
 
     log "下载：${path}"
@@ -106,10 +111,18 @@ run_remote_script() {
 
 run_tuning() {
     echo
-    warn '【第 1 步】Debian VPS / TCP 调优。'
+    warn '【第 1 步】tcpfit / TCP 调优。'
     warn '此操作可能修改系统网络参数。'
     ask_yes_no '确认执行第 1 步吗？' || { warn '已取消。'; return 0; }
     run_remote_script "$SCRIPT_TUNING"
+}
+
+run_diagnostics() {
+    echo
+    log '启动 XY 系列 VPS 质量检测菜单（ScriptMenu）。'
+    log '可选择 IP 质量、网络质量和硬件质量检测。'
+    warn '退出检测子菜单后会返回本菜单。'
+    run_remote_script "$SCRIPT_DIAGNOSTICS"
 }
 
 run_ssh_manager() {
@@ -297,7 +310,7 @@ run_recommended_flow() {
     echo '============================================================'
     echo
     echo '将严格按照菜单 1 → 5 执行：'
-    echo '  1. Debian VPS / TCP 调优'
+    echo '  1. tcpfit / TCP 调优'
     echo '  2. SSH 密钥管理'
     echo '  3. 3x-ui'
     echo '  4. Cloudflared 自动更新（仅 cloudflared 已安装时）'
@@ -306,7 +319,7 @@ run_recommended_flow() {
     warn '各子脚本自己的安全确认和交互输入仍然保留。'
     ask_yes_no '确认按 1 → 5 顺序开始执行吗？' || { warn '已取消。'; return 0; }
 
-    log '[第 1 步 / 5] Debian VPS / TCP 调优'
+    log '[第 1 步 / 5] tcpfit / TCP 调优'
     run_remote_script "$SCRIPT_TUNING" || return 1
 
     log '[第 2 步 / 5] SSH Key Manager'
@@ -337,7 +350,7 @@ print_menu() {
     echo
     echo '【推荐执行顺序：从 1 开始依次往下执行】'
     echo
-    echo '1) 第 1 步：Debian VPS / TCP 调优'
+    echo '1) 第 1 步：tcpfit / TCP 调优'
     echo '2) 第 2 步：SSH 密钥管理'
     echo '3) 第 3 步：安装 3x-ui'
     echo '4) 第 4 步：安装 Cloudflared 自动更新任务'
@@ -348,6 +361,7 @@ print_menu() {
     echo '6) 一键按 1 → 5 顺序执行全部步骤'
     echo '7) CrowdSec Guard 端口管理 / 自动兼容初始化'
     echo '8) 查看当前状态'
+    echo '9) VPS 质量检测菜单（IP / 网络 / 硬件）'
     echo '0) 退出'
     echo
 }
@@ -357,7 +371,7 @@ main_loop() {
 
     while true; do
         print_menu
-        printf '请选择 [0-8]: ' >"$TTY"
+        printf '请选择 [0-9]: ' >"$TTY"
         IFS= read -r choice <"$TTY" || choice='0'
 
         case "$choice" in
@@ -369,11 +383,13 @@ main_loop() {
             6) run_recommended_flow || true; pause_menu ;;
             7) run_port_manager || true; pause_menu ;;
             8) show_status || true; pause_menu ;;
+            9) run_diagnostics || true; pause_menu ;;
             0) echo; log '已退出 New Machine Setup。'; exit 0 ;;
-            *) warn '无效选择，请输入 0-8。'; sleep 1 ;;
+            *) warn '无效选择，请输入 0-9。'; sleep 1 ;;
         esac
     done
 }
 
 check_environment
 main_loop
+
